@@ -253,7 +253,7 @@ input[type=file]{display:none;}
 
 <div class="section" id="upload-section">
   <h2>Generate your stories</h2>
-  <p class="sub">Upload 3–5 photos. Get three different story versions — pick your favorite.</p>
+  <p class="sub">Upload 1–5 photos. Get three different story versions — pick your favorite.</p>
   <input type="file" id="file-input" multiple accept="image/*">
   <div class="upload-box" onclick="document.getElementById('file-input').click()">
     <svg width="32" height="32" fill="none" stroke="#7C3AED" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
@@ -418,8 +418,8 @@ document.getElementById('file-input').addEventListener('change', function(){
       slot.classList.remove('filled');
     }
   }
-  document.getElementById('photo-count').textContent = files.length + ' of 5 photos uploaded';
-  document.getElementById('gen-btn').disabled = files.length < 3;
+  document.getElementById('photo-count').textContent = files.length + ' of 5 photos uploaded' + (files.length === 0 ? '' : files.length < 5 ? ' (we\'ll fill the rest)' : '');
+  document.getElementById('gen-btn').disabled = files.length < 1;
   document.getElementById('output-section').style.display = 'none';
   document.getElementById('selected-story').style.display = 'none';
 });
@@ -441,8 +441,11 @@ async function generateStories(){
 
   try {
     var fd = new FormData();
-    files.forEach(function(f){ fd.append('images', f); });
-    var r = await fetch('https://storifai-improved-1078109938306.us-central1.run.app/generate', {method:'POST', body:fd, signal: AbortSignal.timeout(15000)});
+    // Pad to exactly 5 images by cycling through user's uploads
+    var padded = [];
+    for (var i = 0; i < 5; i++) padded.push(files[i % files.length]);
+    padded.forEach(function(f, i){ fd.append('image' + (i + 1), f); });
+    var r = await fetch('https://storifai-baseline-1078109938306.us-central1.run.app/generate', {method:'POST', body:fd, signal: AbortSignal.timeout(120000)});
     var d = await r.json();
     if(d.stories && d.stories.length === 3){
       currentStories[1] = d.stories[0];
