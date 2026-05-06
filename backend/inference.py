@@ -142,6 +142,7 @@ class StoryGenerator:
 
     @torch.no_grad()
     def generate_story(self, image_bytes_list: List[bytes]) -> List[str]:
+        """Greedy decode — returns 5 sentences. Kept for backward compat."""
         if self.model is None:
             raise RuntimeError("model not loaded; call load() first")
         images = self._prepare_images(image_bytes_list)
@@ -151,7 +152,39 @@ class StoryGenerator:
             eos_idx=self.eos_idx,
             max_len=MAX_LEN,
             temperature=1.0,
+            do_sample=False,
         )
         tokens = tokens[0].cpu().tolist()
-        sentences = [self._decode_tokens(seq) for seq in tokens]
-        return sentences
+        return [self._decode_tokens(seq) for seq in tokens]
+
+    @torch.no_grad()
+    def generate_stories(self, image_bytes_list: List[bytes],
+                         num_versions: int = 3) -> List[List[str]]:
+        """Generate `num_versions` stylistically-different stories.
+
+        Version 1: greedy (deterministic, often the most fluent)
+        Version 2: nucleus sampling, temp=0.9 (varied but coherent)
+        Version 3: nucleus sampling, temp=1.2 (more diverse word choice)
+        """
+        if self.model is None:
+            raise RuntimeError("model not loaded; call load() first")
+        images = self._prepare_images(image_bytes_list)
+
+        configs = [
+            {"do_sample": False, "temperature": 1.0, "top_p": 1.0},   # greedy
+            {"do_sample": True,  "temperature": 0.9, "top_p": 0.9},   # mid
+            {"do_sample": True,  "temperature": 1.2, "top_p": 0.95},  # diverse
+        ][:num_versions]
+
+        stories: List[List[str]] = []
+        for cfg in configs:
+            tokens = self.model.generate(
+                images,
+                sos_idx=self.sos_idx,
+                eos_idx=self.eos_idx,
+                max_len=MAX_LEN,
+                **cfg,
+            )
+            tokens = tokens[0].cpu().tolist()
+            stories.append([self._decode_tokens(seq) for seq in tokens])
+        return stories

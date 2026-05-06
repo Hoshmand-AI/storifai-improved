@@ -2,6 +2,23 @@
 improved (CLIP ViT-B/32 + Cross-Image Attention + Transformer Decoder)."""
 import math
 
+
+
+def _sample_next(logits, do_sample=False, top_p=0.9):
+    """Pick next token: argmax (greedy) or top-p nucleus sampling."""
+    import torch
+    if not do_sample:
+        return logits.argmax(dim=-1, keepdim=True)
+    sorted_logits, sorted_idx = torch.sort(logits, descending=True, dim=-1)
+    sorted_probs = torch.softmax(sorted_logits, dim=-1)
+    cumprobs = sorted_probs.cumsum(dim=-1)
+    mask = cumprobs > top_p
+    mask[..., 0] = False
+    sorted_logits = sorted_logits.masked_fill(mask, float("-inf"))
+    probs = torch.softmax(sorted_logits, dim=-1)
+    idx_in_sorted = torch.multinomial(probs, num_samples=1)
+    return sorted_idx.gather(-1, idx_in_sorted)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -62,7 +79,7 @@ class LSTMDecoder(nn.Module):
         return logits
 
     def generate(self, image_feat, sos_idx, eos_idx, max_len=None,
-                 temperature=1.0):
+                 temperature=1.0, do_sample=False, top_p=0.9):
         if max_len is None:
             max_len = self.max_len
         device = image_feat.device
@@ -71,15 +88,13 @@ class LSTMDecoder(nn.Module):
         h = self.image_to_h(image_feat).unsqueeze(0)
         c = self.image_to_c(image_feat).unsqueeze(0)
         tokens = torch.full((N, 1), sos_idx, dtype=torch.long, device=device)
-        result = []
 
         for _ in range(max_len - 1):
             emb = self.embed(tokens[:, -1:])
             out, (h, c) = self.lstm(emb, (h, c))
             logits = self.out(out[:, -1]) / max(temperature, 1e-6)
-            nxt = logits.argmax(dim=-1, keepdim=True)
+            nxt = _sample_next(logits, do_sample=do_sample, top_p=top_p)
             tokens = torch.cat([tokens, nxt], dim=1)
-            result.append(nxt)
         return tokens
 
 
@@ -103,12 +118,14 @@ class BaselineModel(nn.Module):
 
     @torch.no_grad()
     def generate(self, images, sos_idx, eos_idx, max_len=None,
-                  temperature=1.0):
+                  temperature=1.0, do_sample=False, top_p=0.9):
         B, P = images.shape[:2]
         feat = self.encoder(images).view(B * P, -1)
         tokens = self.decoder.generate(feat, sos_idx, eos_idx,
                                         max_len=max_len,
-                                        temperature=temperature)
+                                        temperature=temperature,
+                                        do_sample=do_sample,
+                                        top_p=top_p)
         return tokens.view(B, P, -1)
 
 
@@ -200,7 +217,7 @@ class TransformerStoryDecoder(nn.Module):
 
     @torch.no_grad()
     def generate(self, image_context, sos_idx, eos_idx, max_len=None,
-                 temperature=1.0):
+                 temperature=1.0, do_sample=False, top_p=0.9):
         if max_len is None:
             max_len = self.max_len
         device = image_context.device
@@ -213,7 +230,7 @@ class TransformerStoryDecoder(nn.Module):
             out = self.decoder(tgt=tgt, memory=image_context,
                                 tgt_mask=tgt_mask)
             logits = self.out(out[:, -1]) / max(temperature, 1e-6)
-            nxt = logits.argmax(dim=-1, keepdim=True)
+            nxt = _sample_next(logits, do_sample=do_sample, top_p=top_p)
             tokens = torch.cat([tokens, nxt], dim=1)
         return tokens
 
@@ -253,12 +270,14 @@ class ImprovedModel(nn.Module):
 
     @torch.no_grad()
     def generate(self, images, sos_idx, eos_idx, max_len=None,
-                  temperature=1.0):
+                  temperature=1.0, do_sample=False, top_p=0.9):
         B, P = images.shape[:2]
         ctx = self._build_context(images)
         tokens = self.decoder.generate(ctx, sos_idx, eos_idx,
                                         max_len=max_len,
-                                        temperature=temperature)
+                                        temperature=temperature,
+                                        do_sample=do_sample,
+                                        top_p=top_p)
         return tokens.view(B, P, -1)
 
 

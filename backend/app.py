@@ -99,14 +99,13 @@ async def generate(
 
     t0 = time.time()
     try:
-        sentences = generator.generate_story(image_bytes_list)
+        stories = generator.generate_stories(image_bytes_list, num_versions=3)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"inference failed: {exc}")
     elapsed = time.time() - t0
 
     return {
-        "story": sentences,
-        "joined": " ".join(s for s in sentences if s),
+        "stories": stories,
         "model": "improved",
         "inference_seconds": round(elapsed, 2),
     }
